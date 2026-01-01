@@ -33,6 +33,72 @@ const containerRef = ref<HTMLDivElement | null>(null);
 const selectedRegion = ref<{ x: number; y: number; width: number; height: number } | null>(null);
 const fillColor = ref('#000000');
 
+// 選択範囲の操作モード
+type SelectionMode = 'none' | 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se';
+const selectionMode = ref<SelectionMode>('none');
+const selectionDragStart = ref<Point | null>(null);
+const originalRegion = ref<{ x: number; y: number; width: number; height: number } | null>(null);
+const currentCursor = ref<string>('default');
+
+// ハンドルのサイズ（ピクセル）
+const HANDLE_SIZE = 8;
+
+// カーソルスタイルの計算
+const canvasCursorStyle = computed(() => {
+  if (activeTool.value === 'select' && selectedRegion.value && !isDrawing.value) {
+    return currentCursor.value;
+  }
+  // その他のツールはCSSクラスで制御
+  return 'default';
+});
+
+// 選択モードに対応するカーソルスタイルを取得
+function getCursorForMode(mode: SelectionMode): string {
+  switch (mode) {
+    case 'move': return 'move';
+    case 'resize-nw': return 'nw-resize';
+    case 'resize-ne': return 'ne-resize';
+    case 'resize-sw': return 'sw-resize';
+    case 'resize-se': return 'se-resize';
+    default: return 'default';
+  }
+}
+
+// クリック位置が選択範囲のどこに該当するかを判定
+function getSelectionHitTest(point: Point): SelectionMode {
+  if (!selectedRegion.value) return 'none';
+
+  const region = selectedRegion.value;
+  const handleSize = HANDLE_SIZE;
+
+  // 各隅のハンドル領域を定義
+  const handles = {
+    nw: { x: region.x - handleSize, y: region.y - handleSize, width: handleSize * 2, height: handleSize * 2 },
+    ne: { x: region.x + region.width - handleSize, y: region.y - handleSize, width: handleSize * 2, height: handleSize * 2 },
+    sw: { x: region.x - handleSize, y: region.y + region.height - handleSize, width: handleSize * 2, height: handleSize * 2 },
+    se: { x: region.x + region.width - handleSize, y: region.y + region.height - handleSize, width: handleSize * 2, height: handleSize * 2 },
+  };
+
+  // ハンドルとの当たり判定（優先順位高）
+  if (isPointInRect(point, handles.nw)) return 'resize-nw';
+  if (isPointInRect(point, handles.ne)) return 'resize-ne';
+  if (isPointInRect(point, handles.sw)) return 'resize-sw';
+  if (isPointInRect(point, handles.se)) return 'resize-se';
+
+  // 選択範囲内部との当たり判定
+  if (isPointInRect(point, region)) return 'move';
+
+  return 'none';
+}
+
+// 点が矩形内にあるかチェック
+function isPointInRect(point: Point, rect: { x: number; y: number; width: number; height: number }): boolean {
+  return point.x >= rect.x &&
+         point.x <= rect.x + rect.width &&
+         point.y >= rect.y &&
+         point.y <= rect.y + rect.height;
+}
+
 // ズーム機能
 function calculateFitZoom(): number {
   if (!containerRef.value || !imageState.value) return 1.0;
@@ -110,6 +176,14 @@ function handleKeyDown(event: KeyboardEvent) {
     handleRedo();
   }
 }
+
+// ツール切り替え時に選択範囲をクリア
+watch(activeTool, (newTool, oldTool) => {
+  if (oldTool === 'select' && newTool !== 'select' && selectedRegion.value) {
+    console.log('Tool changed from select, clearing selection');
+    clearSelection();
+  }
+});
 
 // キーボードイベントリスナーの追加/削除
 onMounted(() => {
@@ -222,7 +296,11 @@ function handleMouseDown(event: MouseEvent) {
 
   const point = getCanvasPoint(event.clientX, event.clientY);
   if (!point) {
-    console.log('Could not get canvas point');
+    console.log('Could not get canvas point (clicked outside image)');
+    // 画像外をクリックした場合、選択範囲をクリア
+    if (selectedRegion.value) {
+      clearSelection();
+    }
     return;
   }
 
@@ -239,9 +317,24 @@ function handleMouseDown(event: MouseEvent) {
       toolManager.startArrow(point);
       break;
     case 'select':
-      console.log('Starting selection');
-      // 既存の選択をクリア
-      selectedRegion.value = null;
+      // 既存の選択範囲がある場合は、移動/リサイズモードをチェック
+      if (selectedRegion.value) {
+        const mode = getSelectionHitTest(point);
+        if (mode !== 'none') {
+          console.log('Selection manipulation mode:', mode);
+          selectionMode.value = mode;
+          selectionDragStart.value = point;
+          originalRegion.value = { ...selectedRegion.value };
+          break;
+        } else {
+          // 選択範囲外をクリックした場合は選択をクリア
+          console.log('Clicked outside selection, clearing');
+          clearSelection();
+        }
+      }
+      // 新規選択を開始
+      console.log('Starting new selection');
+      selectionMode.value = 'none';
       toolManager.startSelection(point);
       break;
     default:
@@ -250,10 +343,19 @@ function handleMouseDown(event: MouseEvent) {
 }
 
 function handleMouseMove(event: MouseEvent) {
-  if (!hasImage.value || !isDrawing.value) return;
+  if (!hasImage.value) return;
 
   const point = getCanvasPoint(event.clientX, event.clientY);
   if (!point) return;
+
+  // カーソルの更新（選択ツールで選択範囲がある場合）
+  if (activeTool.value === 'select' && selectedRegion.value && !isDrawing.value) {
+    const mode = getSelectionHitTest(point);
+    currentCursor.value = getCursorForMode(mode);
+  }
+
+  // ドラッグ中の処理
+  if (!isDrawing.value) return;
 
   switch (activeTool.value) {
     case 'pen':
@@ -265,8 +367,59 @@ function handleMouseMove(event: MouseEvent) {
       drawArrowPreview();
       break;
     case 'select':
-      toolManager.updateSelection(point);
-      drawSelectionPreview();
+      // 選択範囲の移動またはリサイズ中
+      if (selectionMode.value !== 'none' && selectionDragStart.value && originalRegion.value) {
+        const dx = point.x - selectionDragStart.value.x;
+        const dy = point.y - selectionDragStart.value.y;
+
+        if (selectionMode.value === 'move') {
+          // 移動
+          selectedRegion.value = {
+            x: originalRegion.value.x + dx,
+            y: originalRegion.value.y + dy,
+            width: originalRegion.value.width,
+            height: originalRegion.value.height,
+          };
+        } else {
+          // リサイズ
+          const newRegion = { ...originalRegion.value };
+
+          switch (selectionMode.value) {
+            case 'resize-nw':
+              newRegion.x = originalRegion.value.x + dx;
+              newRegion.y = originalRegion.value.y + dy;
+              newRegion.width = originalRegion.value.width - dx;
+              newRegion.height = originalRegion.value.height - dy;
+              break;
+            case 'resize-ne':
+              newRegion.y = originalRegion.value.y + dy;
+              newRegion.width = originalRegion.value.width + dx;
+              newRegion.height = originalRegion.value.height - dy;
+              break;
+            case 'resize-sw':
+              newRegion.x = originalRegion.value.x + dx;
+              newRegion.width = originalRegion.value.width - dx;
+              newRegion.height = originalRegion.value.height + dy;
+              break;
+            case 'resize-se':
+              newRegion.width = originalRegion.value.width + dx;
+              newRegion.height = originalRegion.value.height + dy;
+              break;
+          }
+
+          // 最小サイズを維持
+          if (newRegion.width >= 10 && newRegion.height >= 10) {
+            selectedRegion.value = newRegion;
+          }
+        }
+
+        // 選択範囲を再描画
+        drawSelectionBorder();
+      } else {
+        // 通常の選択描画
+        toolManager.updateSelection(point);
+        drawSelectionPreview();
+      }
       break;
   }
 }
@@ -284,7 +437,15 @@ function handleMouseUp() {
       finalizeArrow();
       break;
     case 'select':
-      finalizeSelection();
+      // 移動/リサイズモードの場合はモードをリセット
+      if (selectionMode.value !== 'none') {
+        selectionMode.value = 'none';
+        selectionDragStart.value = null;
+        originalRegion.value = null;
+      } else {
+        // 通常の選択確定
+        finalizeSelection();
+      }
       break;
   }
 }
@@ -318,6 +479,24 @@ function drawSelectionBorder() {
     // 半透明の黄色で背景を塗りつぶし
     ctx.fillStyle = 'rgba(251, 191, 36, 0.1)';
     ctx.fillRect(region.x, region.y, region.width, region.height);
+
+    // リサイズハンドルを描画
+    const handleSize = HANDLE_SIZE;
+    ctx.fillStyle = '#fbbf24';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+
+    const handles = [
+      { x: region.x, y: region.y }, // nw
+      { x: region.x + region.width, y: region.y }, // ne
+      { x: region.x, y: region.y + region.height }, // sw
+      { x: region.x + region.width, y: region.y + region.height }, // se
+    ];
+
+    handles.forEach(handle => {
+      ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+      ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+    });
   });
 }
 
@@ -644,10 +823,10 @@ defineExpose({
         <div class="inline-block">
           <canvas
             ref="canvasRef"
-            :style="canvasStyle"
+            :style="{ ...canvasStyle, cursor: canvasCursorStyle }"
             class="shadow-lg"
             :class="{
-              'select-tool': activeTool === 'select',
+              'select-tool': activeTool === 'select' && !selectedRegion,
               'pen-tool': activeTool === 'pen',
               'arrow-tool': activeTool === 'arrow',
             }"
