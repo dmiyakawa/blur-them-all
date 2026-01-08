@@ -188,10 +188,12 @@ watch(activeTool, (newTool, oldTool) => {
 // キーボードイベントリスナーの追加/削除
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('paste', handlePaste as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
+  window.removeEventListener('paste', handlePaste as EventListener);
 });
 
 // ファイル選択
@@ -282,6 +284,57 @@ async function handleDrop(event: DragEvent) {
   } catch (error) {
     console.error('Failed to load image:', error);
     alert('画像の読み込みに失敗しました');
+  }
+}
+
+// クリップボードからのペースト
+async function handlePaste(event: ClipboardEvent) {
+  event.preventDefault();
+
+  const items = event.clipboardData?.items;
+  if (!items) return;
+
+  console.log('Paste event:', items.length, 'items');
+
+  // クリップボードから画像ファイルを探す
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    console.log('Clipboard item:', item.type, item.kind);
+
+    // 画像アイテムを見つける
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (!file) continue;
+
+      console.log('Image file from clipboard:', file.name || 'clipboard-image', file.type);
+
+      try {
+        const state = await imageProcessor.loadImage(file);
+        console.log('Image loaded from clipboard');
+
+        // imageStateを先に更新してv-ifでcanvasをDOMに追加
+        imageState.value = state;
+
+        // nextTickを待ってcanvasがDOMに追加されてから描画
+        await nextTick();
+
+        console.log('After nextTick (paste), canvasRef:', canvasRef.value);
+        drawImage(state);
+
+        // 画像を画面に収める
+        await nextTick();
+        fitToScreen();
+
+        pushHistory(state, 'Paste image');
+        console.log('Paste complete');
+      } catch (error) {
+        console.error('Failed to load image from clipboard:', error);
+        alert('クリップボードからの画像の読み込みに失敗しました');
+      }
+
+      // 最初の画像のみ処理
+      break;
+    }
   }
 }
 
@@ -781,7 +834,7 @@ async function handleExport() {
     downloadBlob(blob, filename);
   } catch (error) {
     console.error('Failed to export image:', error);
-    alert('画像のエクスポートに失敗しました');
+    alert('画像の保存に失敗しました');
   }
 }
 
@@ -892,7 +945,7 @@ defineExpose({
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
         </svg>
         <h3 class="text-xl font-semibold text-gray-700 mb-2">画像をドロップするか、クリックして選択</h3>
-        <p class="text-gray-500 mb-6">PNG, JPEG, GIF, WebP形式に対応（最大10MB）</p>
+        <p class="text-gray-500 mb-6">PNG, JPEG, GIF, WebP形式に対応（最大50MB）</p>
         <button class="btn btn-primary" @click="handleFileSelect">
           画像を選択
         </button>

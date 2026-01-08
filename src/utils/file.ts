@@ -2,17 +2,34 @@ import { FILE_CONFIG } from '@/constants';
 import { ERROR_MESSAGES } from '@/constants';
 
 /**
+ * ファイルサイズを人間が読みやすい形式に変換
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
  * ファイルが有効な画像ファイルかどうかを検証
  */
 export function validateImageFile(file: File): { valid: boolean; error?: string } {
   // ファイルタイプのチェック
   if (!FILE_CONFIG.ALLOWED_TYPES.includes(file.type)) {
-    return { valid: false, error: ERROR_MESSAGES.INVALID_FILE_TYPE };
+    return {
+      valid: false,
+      error: `${ERROR_MESSAGES.INVALID_FILE_TYPE}\n（ファイル形式: ${file.type || '不明'}）`
+    };
   }
 
   // ファイルサイズのチェック
   if (file.size > FILE_CONFIG.MAX_FILE_SIZE) {
-    return { valid: false, error: ERROR_MESSAGES.FILE_TOO_LARGE };
+    const actualSize = formatFileSize(file.size);
+    const maxSize = formatFileSize(FILE_CONFIG.MAX_FILE_SIZE);
+    return {
+      valid: false,
+      error: `${ERROR_MESSAGES.FILE_TOO_LARGE}\n（ファイルサイズ: ${actualSize}、最大: ${maxSize}）`
+    };
   }
 
   return { valid: true };

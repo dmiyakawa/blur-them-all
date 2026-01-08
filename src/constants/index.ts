@@ -17,7 +17,7 @@ export const DB_CONFIG = {
 // File configuration
 export const FILE_CONFIG = {
   ALLOWED_TYPES: ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'],
-  MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
+  MAX_FILE_SIZE: 50 * 1024 * 1024, // 50MB
   EXPORT_FORMAT: 'image/png',
   EXPORT_QUALITY: 0.95,
 } as const;
@@ -67,11 +67,11 @@ export const UI_CONFIG = {
 
 // Error messages
 export const ERROR_MESSAGES = {
-  FILE_TOO_LARGE: 'ファイルサイズが大きすぎます（最大10MB）',
+  FILE_TOO_LARGE: 'ファイルサイズが大きすぎます（最大50MB）',
   INVALID_FILE_TYPE: '対応していないファイル形式です',
   IMAGE_LOAD_FAILED: '画像の読み込みに失敗しました',
   STORAGE_FAILED: 'データの保存に失敗しました',
-  EXPORT_FAILED: '画像のエクスポートに失敗しました',
+  EXPORT_FAILED: '画像の保存に失敗しました',
   INDEXEDDB_NOT_SUPPORTED: 'ブラウザがIndexedDBに対応していません',
 } as const;
 
@@ -79,6 +79,6 @@ export const ERROR_MESSAGES = {
 export const SUCCESS_MESSAGES = {
   IMAGE_LOADED: '画像を読み込みました',
   IMAGE_SAVED: '画像を保存しました',
-  IMAGE_EXPORTED: '画像をエクスポートしました',
+  IMAGE_EXPORTED: '画像を保存しました',
   EFFECT_APPLIED: 'エフェクトを適用しました',
 } as const;
