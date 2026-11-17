@@ -194,6 +194,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
   window.removeEventListener('paste', handlePaste as EventListener);
+  detachDragListeners();
 });
 
 // ファイル選択
@@ -339,8 +340,31 @@ async function handlePaste(event: ClipboardEvent) {
 }
 
 // Canvas操作
+// ドラッグ中は画像外にマウスが出ても操作を継続するため、windowでイベントを受ける
+function attachDragListeners() {
+  window.addEventListener('mousemove', handleDragMove);
+  window.addEventListener('mouseup', handleDragEnd);
+}
+
+function detachDragListeners() {
+  window.removeEventListener('mousemove', handleDragMove);
+  window.removeEventListener('mouseup', handleDragEnd);
+}
+
+function clampToCanvas(point: Point): Point {
+  const canvas = canvasRef.value;
+  if (!canvas) return point;
+  return {
+    x: Math.min(Math.max(point.x, 0), canvas.width),
+    y: Math.min(Math.max(point.y, 0), canvas.height),
+  };
+}
+
 function handleMouseDown(event: MouseEvent) {
   console.log('handleMouseDown called', { hasImage: hasImage.value, activeTool: activeTool.value });
+
+  // 左クリック以外（右クリック・中クリック）は無視
+  if (event.button !== 0) return;
 
   if (!hasImage.value) {
     console.log('No image loaded, ignoring mouse down');
@@ -358,7 +382,10 @@ function handleMouseDown(event: MouseEvent) {
   }
 
   console.log('Mouse down at point:', point);
+  // 画像外へドラッグした際のテキスト選択などを防ぐ
+  event.preventDefault();
   isDrawing.value = true;
+  attachDragListeners();
 
   switch (activeTool.value) {
     case 'pen':
@@ -395,20 +422,27 @@ function handleMouseDown(event: MouseEvent) {
   }
 }
 
+// ドラッグしていないときのカーソル更新（Canvas上のみ）
 function handleMouseMove(event: MouseEvent) {
-  if (!hasImage.value) return;
+  if (!hasImage.value || isDrawing.value) return;
 
   const point = getCanvasPoint(event.clientX, event.clientY);
   if (!point) return;
 
   // カーソルの更新（選択ツールで選択範囲がある場合）
-  if (activeTool.value === 'select' && selectedRegion.value && !isDrawing.value) {
+  if (activeTool.value === 'select' && selectedRegion.value) {
     const mode = getSelectionHitTest(point);
     currentCursor.value = getCursorForMode(mode);
   }
+}
 
-  // ドラッグ中の処理
-  if (!isDrawing.value) return;
+// ドラッグ中の処理（window で受けるため画像外でも継続し、座標は画像の端にクランプ）
+function handleDragMove(event: MouseEvent) {
+  if (!hasImage.value || !isDrawing.value) return;
+
+  const rawPoint = getCanvasPoint(event.clientX, event.clientY);
+  if (!rawPoint) return;
+  const point = clampToCanvas(rawPoint);
 
   switch (activeTool.value) {
     case 'pen':
@@ -477,7 +511,10 @@ function handleMouseMove(event: MouseEvent) {
   }
 }
 
-function handleMouseUp() {
+function handleDragEnd(event: MouseEvent) {
+  if (event.button !== 0) return;
+  detachDragListeners();
+
   if (!hasImage.value || !isDrawing.value) return;
 
   isDrawing.value = false;
@@ -885,8 +922,6 @@ defineExpose({
             }"
             @mousedown="handleMouseDown"
             @mousemove="handleMouseMove"
-            @mouseup="handleMouseUp"
-            @mouseleave="handleMouseUp"
           />
         </div>
 
